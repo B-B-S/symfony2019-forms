@@ -6,6 +6,8 @@ namespace App\Form;
 
 use App\Entity\Category;
 use App\Entity\Exception\CategoryException;
+use Doctrine\ORM\EntityRepository;
+use Symfony\Bridge\Doctrine\Form\Type\EntityType;
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\DataMapperInterface;
 use Symfony\Component\Form\Exception;
@@ -35,6 +37,12 @@ class CategoryType extends AbstractType implements DataMapperInterface
 
         // initialize form field values
         $forms['name']->setData($viewData->getName());
+        if ($viewData->hasParent()) {
+            $forms['parent']->setData($viewData->getParent());
+        } else {
+            $forms['parent']->setData(null);
+        }
+
     }
 
     /**
@@ -55,6 +63,11 @@ class CategoryType extends AbstractType implements DataMapperInterface
 
         try {
             $viewData->rename($forms['name']->getData());
+            if($forms['parent']->getData() === null) {
+                $viewData->removeParent();
+            } else {
+                $viewData->moveTo($forms['parent']->getData());
+            }
         } catch (CategoryException $exception) {
             $forms['name']->addError(new FormError($exception->getMessage()));
         }
@@ -63,7 +76,22 @@ class CategoryType extends AbstractType implements DataMapperInterface
     public function buildForm(FormBuilderInterface $builder, array $options)
     {
         $builder
-            ->add('name');
+            ->add('name')
+            ->add('parent', EntityType::class, [
+                'class' => Category::class,
+                'choice_label' => 'name',
+                'placeholder' => 'no parent',
+                'query_builder' => static function (EntityRepository $er) use ($options) {
+                    if (!array_key_exists('data', $options)) {
+                        return;
+                    }
+
+                    return $er
+                        ->createQueryBuilder('category')
+                        ->where('category != :parent')
+                        ->setParameter('parent', $options['data']);
+                }
+            ]);
 
         $builder->setDataMapper($this);
     }
@@ -74,7 +102,8 @@ class CategoryType extends AbstractType implements DataMapperInterface
         $resolver->setDefault('empty_data', static function (FormInterface $form) {
             try {
                 return new Category(
-                    $form->get('name')->getData()
+                    $form->get('name')->getData(),
+                    $form->get('parent')->getData()
                 );
             } catch(CategoryException $exception) {
                 $form->get('name')->addError(new FormError($exception->getMessage()));
